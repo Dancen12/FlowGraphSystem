@@ -34,6 +34,9 @@ public class RemoveCyclesService implements SubprocessTaskService {
             String target = strToIntVertices.get(tokens[1]).toString();
             stringBuilder.append(source).append(" ").append(target).append("\n");
         });
+
+        Map<Integer, String> intToStrMap = createInverseMap(strToIntVertices);
+
         String argsForProcess = stringBuilder.toString();
 
         try {
@@ -47,7 +50,7 @@ public class RemoveCyclesService implements SubprocessTaskService {
             bufferedWriter.write(argsForProcess);
             bufferedWriter.flush();
             int exitCode = process.waitFor();
-            processOutput(bufferedReader);
+            processOutput(bufferedReader, intToStrMap);
 
             if (exitCode != 0) {
                 throw new RuntimeException("GraphCycleReducer exit with code: " + exitCode);
@@ -60,17 +63,24 @@ public class RemoveCyclesService implements SubprocessTaskService {
 
     }
 
-    private void processOutput(BufferedReader bufferedReader) throws IOException {
+    private void processOutput(BufferedReader bufferedReader, Map<Integer, String> intToStrMap) throws IOException {
 
         List<String[]> rawEdges = new ArrayList<>();
         Set<String> used = new LinkedHashSet<>();
         String line;
+        int highestPathId = 0;
         while ((line = bufferedReader.readLine()) != null && !line.equals("G3:"))
             ;
         while ((line = bufferedReader.readLine()) != null && !line.equals("v components:")) {
             if (line.trim().isEmpty()) continue;
             String[] parts = line.split(":");
             String from = parts[0].trim();
+            if (from.matches("^p\\d+")) {
+                int pathId = Integer.parseInt(from.replaceAll("^p", ""));
+                if (pathId > highestPathId) {
+                    highestPathId = pathId;
+                }
+            }
             if (parts.length > 1 && !parts[1].trim().isEmpty()) {
                 for (String to : parts[1].trim().split("\\s+")) {
                     rawEdges.add(new String[]{from, to});
@@ -100,14 +110,33 @@ public class RemoveCyclesService implements SubprocessTaskService {
         graphModel.setSource("s");
         graphModel.setSink("t");
 
-        String messageWithVComponents = "";
+        StringBuilder messageWithVComponents = new StringBuilder();
         while ((line = bufferedReader.readLine()) != null && !line.equals("Paths:")) {
             if (line.charAt(0) == 'v') {
-                messageWithVComponents += line.trim() + "\n";
+                messageWithVComponents.append(line.trim()).append("\n");
             }
         }
 
-        appView.showMessage("V components", messageWithVComponents);
+        appView.showMessage("V components", messageWithVComponents.toString());
+
+        StringBuilder messageWithPaths = new StringBuilder();
+        int numberOfPaths = 0;
+        while ((line = bufferedReader.readLine()) != null && numberOfPaths <= highestPathId) {
+            StringBuilder messageLine = new StringBuilder(String.format("p%d: ", numberOfPaths));
+            String[] pathVertices = line.split(" ");
+            for (int i = 0; i < pathVertices.length; i++) {
+                int vertex = Integer.parseInt(pathVertices[i]);
+                if (i != 0) {
+                    messageLine.append("-> ");
+                }
+                messageLine.append(intToStrMap.get(vertex));
+            }
+            messageWithPaths.append(messageLine).append("\n");
+            numberOfPaths++;
+        }
+
+        appView.showMessage("Paths", messageWithPaths.toString());
+
     }
 
     private String getPath() {
@@ -136,6 +165,14 @@ public class RemoveCyclesService implements SubprocessTaskService {
             }
         }
         return convertedVertices;
+    }
+
+    private Map<Integer, String> createInverseMap(Map<String, Integer> map) {
+        Map<Integer, String> inverseMap = new HashMap<>();
+        for (Map.Entry<String, Integer> entry : map.entrySet()) {
+            inverseMap.put(entry.getValue(), entry.getKey());
+        }
+        return inverseMap;
     }
 
 }
